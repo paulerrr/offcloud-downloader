@@ -113,20 +113,18 @@ class OffCloudTorrent {
     // Show torrent status
     console.log(`[+] '${this.file}' id: ${this.id} local: ${this.status} remote: ${info.status.status} size: ${info.status.fileSize} bytes`)
 
-          // Has the remote status finished downloading
+    // Has the remote status finished downloading
     if (info.status.status === 'downloaded' && this.status === 'downloading') {
       // Mark torrent as downloaded
       this.status = 'downloaded'
       this.isdir = info.status.isDirectory
 
-      // Extract the filename without extension to use as folder name
-      const torrentFileName = path.basename(this.file).replace(/\.[^/.]+$/, "");
-      
       if (this.isdir === false) {
         this.status = 'aria2dl'
         console.log('Downloadlink: ' + this.alturl + '/' + querystring.escape(info.status.fileName))
-        return this.downloadFn([this.alturl + '/' + querystring.escape(info.status.fileName)], torrentFileName)
-          .then(() => { this._delete() })
+        const path = this.file.substr(0, this.file.lastIndexOf('/'))
+        return this.downloadFn([this.alturl + '/' + querystring.escape(info.status.fileName)], path)
+          .then(() => { this._delete() })//
           .catch(err => console.error('[!] add download failed', err))
       }
 
@@ -134,9 +132,8 @@ class OffCloudTorrent {
         .then((res) => {
           this.status = 'aria2dl'
           console.log(`[+] '${this.file}' downloading locally '${res}'`)
-          
-          // Pass just the filename without extension for folder naming
-          this.downloadFn(res, torrentFileName)
+          const path = this.file.substr(0, this.file.lastIndexOf('/'))
+          this.downloadFn(res, path)
             .then(() => { this._delete() })
             .catch(err => console.error('[!] download failed', err))
         })
@@ -144,10 +141,9 @@ class OffCloudTorrent {
           if (err === 'Bad archive') {
             this.status = 'aria2dl'
             console.log(`[+] '${this.file}' downloading locally (alt) '${err}'`)
-            
-            // Pass just the filename without extension for folder naming
-            this.downloadFn([this.alturl], torrentFileName)
-              .then(() => { this._delete() })
+            const path = this.file.substr(0, this.file.lastIndexOf('/'))
+            this.downloadFn([this.alturl], path)
+              .then(() => { this._delete() })//
               .catch(err => console.error('[!] add download failed', err))
           } else {
             console.error('[!] explore failed', err)
