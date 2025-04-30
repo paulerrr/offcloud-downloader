@@ -1,4 +1,4 @@
-# offcloudbrid
+# offcloud-downloader
 
 An offcloud.com blackhole downloader.
 
