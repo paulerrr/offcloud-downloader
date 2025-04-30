@@ -9,5 +9,5 @@ services:
     volumes:
       - /workspace/node_modules
       - .:/workspace
-      - ./watch:/watch
-      - ./download:/download
+      - E:/offcloud/watch:/watch
+      - E:/offcloud/download:/download
