@@ -7,7 +7,9 @@ const path = require('path')
 const {
   OFFCLOUD_API_KEY,
   WATCH_DIR = '/watch',
-  DOWNLOAD_DIR = '/download',
+  DOWNLOAD_DIR = '/download', // Keep for backward compatibility
+  IN_PROGRESS_DIR = '/in-progress',
+  COMPLETED_DIR = '/completed',
   WATCH_RATE = 5000
 } = process.env
 
@@ -16,8 +18,26 @@ if (!OFFCLOUD_API_KEY) {
   process.exit(-1)
 }
 
-// Create a downloader instance
-const downloader = new Downloader(WATCH_DIR, DOWNLOAD_DIR)
+// Ensure all required directories exist
+for (const dir of [WATCH_DIR, IN_PROGRESS_DIR, COMPLETED_DIR]) {
+  if (!fs.existsSync(dir)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log(`[+] Created directory: ${dir}`);
+    } catch (err) {
+      console.log(`[!] Error creating directory ${dir}: ${err.message}`);
+    }
+  }
+}
+
+// Create a downloader instance with the new directories
+// Note: DOWNLOAD_DIR is kept as parameter for compatibility but not used
+const downloader = new Downloader(WATCH_DIR, DOWNLOAD_DIR, IN_PROGRESS_DIR, COMPLETED_DIR);
+
+console.log(`[+] Download configuration:`);
+console.log(`    Watch directory: ${WATCH_DIR}`);
+console.log(`    In-progress directory: ${IN_PROGRESS_DIR}`);
+console.log(`    Completed directory: ${COMPLETED_DIR}`);
 
 // Create a watcher instance
 const watcher = new OffCloudWatcher(OFFCLOUD_API_KEY, downloader.download)

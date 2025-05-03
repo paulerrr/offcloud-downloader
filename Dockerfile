@@ -2,7 +2,7 @@ FROM node:12-alpine
 
 WORKDIR /workspace
 
-RUN mkdir -p /watch && mkdir -p /download
+RUN mkdir -p /watch && mkdir -p /download && mkdir -p /in-progress && mkdir -p /completed
 
 COPY package.json yarn.lock /workspace/
 RUN yarn install --frozen-lockfile

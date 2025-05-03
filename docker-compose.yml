@@ -10,4 +10,5 @@ services:
       - /workspace/node_modules
       - .:/workspace
       - E:/offcloud/watch:/watch
-      - E:/offcloud/download:/download
+      - E:/offcloud/in-progress:/in-progress
+      - E:/offcloud/completed:/completed
