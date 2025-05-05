@@ -3,6 +3,7 @@ const OffCloudWatcher = require('./lib/watchers/offcloud')
 const Downloader = require('./lib/downloaders/inline')
 const fs = require('fs')
 const path = require('path')
+const logger = require('./lib/utils/logger')
 
 // Parse environment variables, ensuring numeric values are converted from strings to numbers
 const {
@@ -24,7 +25,7 @@ const FILE_POLL_INTERVAL = parseInt(pollIntervalStr, 10) || 1000
 const FILE_STABLE_TIME = parseInt(stableTimeStr, 10) || 5000
 
 if (!OFFCLOUD_API_KEY) {
-  console.log('[!] OFFCLOUD_API_KEY env var is not set')
+  logger.error('OFFCLOUD_API_KEY environment variable is not set')
   process.exit(-1)
 }
 
@@ -33,9 +34,9 @@ for (const dir of [WATCH_DIR, IN_PROGRESS_DIR, COMPLETED_DIR]) {
   if (!fs.existsSync(dir)) {
     try {
       fs.mkdirSync(dir, { recursive: true });
-      console.log(`[+] Created directory: ${dir}`);
+      logger.success(`Created directory: ${dir}`);
     } catch (err) {
-      console.log(`[!] Error creating directory ${dir}: ${err.message}`);
+      logger.error(`Error creating directory ${dir}:`, err.message);
     }
   }
 }
@@ -44,13 +45,13 @@ for (const dir of [WATCH_DIR, IN_PROGRESS_DIR, COMPLETED_DIR]) {
 // Note: DOWNLOAD_DIR is kept as parameter for compatibility but not used
 const downloader = new Downloader(WATCH_DIR, DOWNLOAD_DIR, IN_PROGRESS_DIR, COMPLETED_DIR);
 
-console.log(`[+] Download configuration:`);
-console.log(`    Watch directory: ${WATCH_DIR}`);
-console.log(`    In-progress directory: ${IN_PROGRESS_DIR}`);
-console.log(`    Completed directory: ${COMPLETED_DIR}`);
-console.log(`    Max concurrent downloads: ${MAX_CONCURRENT_DOWNLOADS}`);
-console.log(`    File poll interval: ${FILE_POLL_INTERVAL}ms`);
-console.log(`    File stability threshold: ${FILE_STABLE_TIME}ms`);
+logger.info('Download configuration:');
+logger.info(`Watch directory: ${WATCH_DIR}`);
+logger.info(`In-progress directory: ${IN_PROGRESS_DIR}`);
+logger.info(`Completed directory: ${COMPLETED_DIR}`);
+logger.info(`Max concurrent downloads: ${MAX_CONCURRENT_DOWNLOADS}`);
+logger.info(`File poll interval: ${FILE_POLL_INTERVAL}ms`);
+logger.info(`File stability threshold: ${FILE_STABLE_TIME}ms`);
 
 // Create a watcher instance with the queue system
 const watcher = new OffCloudWatcher(
@@ -59,7 +60,7 @@ const watcher = new OffCloudWatcher(
   MAX_CONCURRENT_DOWNLOADS  // Now a number, not a string
 )
 
-console.log(`[+] Watching '${WATCH_DIR}' for new nzbs, magnets and torrents`)
+logger.info(`Watching '${WATCH_DIR}' for new nzbs, magnets and torrents`)
 
 // Track watcher state
 let watcherHealthy = true
@@ -73,8 +74,8 @@ let fileWatcher = chokidar.watch(`${WATCH_DIR}`, {
   persistent: true,
   ignoreInitial: false,
   awaitWriteFinish: {
-    stabilityThreshold: FILE_STABLE_TIME,  // Now a number, not a string
-    pollInterval: FILE_POLL_INTERVAL       // Now a number, not a string
+    stabilityThreshold: FILE_STABLE_TIME,
+    pollInterval: FILE_POLL_INTERVAL
   },
   ignored: [
     /(^|[\/\\])\../,  // Ignore dotfiles
@@ -83,21 +84,21 @@ let fileWatcher = chokidar.watch(`${WATCH_DIR}`, {
     '**/*.downloading' // Ignore downloading files
   ],
   depth: 99,
-  usePolling: true,          // Add polling for more reliable detection
-  interval: FILE_POLL_INTERVAL,  // Now a number, not a string
-  binaryInterval: 3000,      // Interval for binary files
-  alwaysStat: true,          // Always use fs.stat to check for changes
-  atomic: 500                // Treat all events as newer than 500ms as atomic
+  usePolling: true,
+  interval: FILE_POLL_INTERVAL,
+  binaryInterval: 3000,
+  alwaysStat: true,
+  atomic: 500
 })
 
 // Handle file add event
 fileWatcher.on('add', filePath => {
-  console.log(`[+] Detected new file: '${filePath}'`)
+  logger.info(`Detected new file: '${filePath}'`)
   lastFileAddedTime = Date.now()
   
   // Check if this file is already being processed
   if (processedFiles.has(filePath)) {
-    console.log(`[!] File '${filePath}' is already being processed, skipping`);
+    logger.warn(`File '${filePath}' is already being processed, skipping`);
     return;
   }
   
@@ -106,7 +107,7 @@ fileWatcher.on('add', filePath => {
       filePath.indexOf('.queued') !== -1 || 
       filePath.indexOf('.part') !== -1 || 
       filePath.indexOf('.downloading') !== -1) {
-    console.log(`[!] Ignoring '${filePath}' because it is a work file or hidden file`);
+    logger.debug(`Ignoring '${filePath}' because it is a work file or hidden file`);
     return;
   }
   
@@ -125,19 +126,19 @@ fileWatcher.on('add', filePath => {
       processedFiles.delete(filePath);
     }, 3600000); // 1 hour
   } else {
-    console.log(`[!] Ignoring '${filePath}' because it has an unknown extension`);
+    logger.warn(`Ignoring '${filePath}' because it has an unknown extension`);
   }
 })
 
 // Handle errors
 fileWatcher.on('error', error => {
-  console.log(`[!] Watcher error: ${error}`)
+  logger.error(`Watcher error:`, error)
   watcherHealthy = false
 })
 
 // Handle watcher ready state
 fileWatcher.on('ready', () => {
-  console.log('[+] Initial scan complete. Ready for changes')
+  logger.success('Initial scan complete. Ready for changes')
   watcherHealthy = true
 })
 
@@ -146,10 +147,10 @@ const recreateWatcher = () => {
   try {
     if (fileWatcher) {
       fileWatcher.close().then(() => {
-        console.log('[+] Closed old watcher, creating new one');
+        logger.info('Closed old watcher, creating new one');
         createNewWatcher();
       }).catch(err => {
-        console.log(`[!] Error closing watcher: ${err.message}`);
+        logger.error(`Error closing watcher:`, err.message);
         // Create new watcher anyway
         createNewWatcher();
       });
@@ -157,7 +158,7 @@ const recreateWatcher = () => {
       createNewWatcher();
     }
   } catch (err) {
-    console.log(`[!] Error recreating watcher: ${err.message}`);
+    logger.error(`Error recreating watcher:`, err.message);
     createNewWatcher();
   }
 };
@@ -168,8 +169,8 @@ const createNewWatcher = () => {
     persistent: true,
     ignoreInitial: false,
     awaitWriteFinish: {
-      stabilityThreshold: FILE_STABLE_TIME,  // Now a number, not a string
-      pollInterval: FILE_POLL_INTERVAL       // Now a number, not a string
+      stabilityThreshold: FILE_STABLE_TIME,
+      pollInterval: FILE_POLL_INTERVAL
     },
     ignored: [
       /(^|[\/\\])\../,  // Ignore dotfiles
@@ -179,7 +180,7 @@ const createNewWatcher = () => {
     ],
     depth: 99,
     usePolling: true,
-    interval: FILE_POLL_INTERVAL,  // Now a number, not a string
+    interval: FILE_POLL_INTERVAL,
     binaryInterval: 3000,
     alwaysStat: true,
     atomic: 500
@@ -187,12 +188,12 @@ const createNewWatcher = () => {
   
   // Reattach event handlers
   fileWatcher.on('add', filePath => {
-    console.log(`[+] Detected new file: '${filePath}'`)
+    logger.info(`Detected new file: '${filePath}'`)
     lastFileAddedTime = Date.now()
     
     // Check if this file is already being processed
     if (processedFiles.has(filePath)) {
-      console.log(`[!] File '${filePath}' is already being processed, skipping`);
+      logger.warn(`File '${filePath}' is already being processed, skipping`);
       return;
     }
     
@@ -201,7 +202,7 @@ const createNewWatcher = () => {
         filePath.indexOf('.queued') !== -1 || 
         filePath.indexOf('.part') !== -1 || 
         filePath.indexOf('.downloading') !== -1) {
-      console.log(`[!] Ignoring '${filePath}' because it is a work file or hidden file`);
+      logger.debug(`Ignoring '${filePath}' because it is a work file or hidden file`);
       return;
     }
     
@@ -219,17 +220,17 @@ const createNewWatcher = () => {
         processedFiles.delete(filePath);
       }, 3600000); // 1 hour
     } else {
-      console.log(`[!] Ignoring '${filePath}' because it has an unknown extension`);
+      logger.warn(`Ignoring '${filePath}' because it has an unknown extension`);
     }
   });
   
   fileWatcher.on('error', error => {
-    console.log(`[!] Watcher error: ${error}`);
+    logger.error(`Watcher error:`, error);
     watcherHealthy = false;
   });
   
   fileWatcher.on('ready', () => {
-    console.log('[+] Initial scan complete. Ready for changes');
+    logger.success('Initial scan complete. Ready for changes');
     watcherHealthy = true;
   });
 };
@@ -238,19 +239,19 @@ const createNewWatcher = () => {
 setInterval(() => {
   // Check watcher health
   if (!watcherHealthy) {
-    console.log('[!] Watcher appears unhealthy, attempting to recover...')
+    logger.warn('Watcher appears unhealthy, attempting to recover...')
     recreateWatcher();
   }
 
   // If it's been a while since a file was processed, do a manual check
   const timeSinceLastFile = Date.now() - lastFileAddedTime
   if (timeSinceLastFile > 30000) { // 30 seconds
-    console.log('[+] Performing periodic directory scan')
+    logger.debug('Performing periodic directory scan')
     
     // Manual scan for new files that might have been missed
     fs.readdir(WATCH_DIR, { withFileTypes: true }, (err, dirents) => {
       if (err) {
-        console.log(`[!] Error reading directory: ${err.message}`)
+        logger.error(`Error reading directory:`, err.message)
         return
       }
       
@@ -283,7 +284,7 @@ setInterval(() => {
                                                  []).includes(filePath)));
           
           if (!isAlreadyProcessing) {
-            console.log(`[+] Found unprocessed file during scan: '${filePath}'`);
+            logger.info(`Found unprocessed file during scan: '${filePath}'`);
             
             // Add to processed set to prevent duplicates
             processedFiles.add(filePath);
@@ -312,19 +313,19 @@ setInterval(() => {
 setInterval(() => {
   const oldSize = processedFiles.size;
   if (oldSize > 1000) {
-    console.log(`[+] Cleaning up processed files cache (${oldSize} entries)`);
+    logger.info(`Cleaning up processed files cache (${oldSize} entries)`);
     processedFiles.clear();
   }
 }, 3600000); // Every hour
 
 // Handle process termination
 process.on('SIGINT', () => {
-  console.log('Closing watchers and exiting...')
+  logger.info('Closing watchers and exiting...')
   if (fileWatcher) {
     try {
       fileWatcher.close()
     } catch (err) {
-      console.log(`[!] Error closing file watcher: ${err.message}`);
+      logger.error(`Error closing file watcher:`, err.message);
     }
   }
   
@@ -332,7 +333,7 @@ process.on('SIGINT', () => {
     try {
       watcher.cleanup()
     } catch (err) {
-      console.log(`[!] Error cleaning up watcher: ${err.message}`);
+      logger.error(`Error cleaning up watcher:`, err.message);
     }
   }
   
@@ -340,12 +341,12 @@ process.on('SIGINT', () => {
 })
 
 process.on('SIGTERM', () => {
-  console.log('Closing watchers and exiting...')
+  logger.info('Closing watchers and exiting...')
   if (fileWatcher) {
     try {
       fileWatcher.close()
     } catch (err) {
-      console.log(`[!] Error closing file watcher: ${err.message}`);
+      logger.error(`Error closing file watcher:`, err.message);
     }
   }
   
@@ -353,7 +354,7 @@ process.on('SIGTERM', () => {
     try {
       watcher.cleanup()
     } catch (err) {
-      console.log(`[!] Error cleaning up watcher: ${err.message}`);
+      logger.error(`Error cleaning up watcher:`, err.message);
     }
   }
   
