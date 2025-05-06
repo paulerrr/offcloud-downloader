@@ -1,12 +1,29 @@
 FROM node:20-alpine
 
+# Set working directory
 WORKDIR /workspace
 
-RUN mkdir -p /watch && mkdir -p /download && mkdir -p /in-progress && mkdir -p /completed
+# Create required directories
+RUN mkdir -p /watch /in-progress /completed /logs
 
-COPY package.json yarn.lock /workspace/
-RUN yarn install --frozen-lockfile
+# Set environment variables
+ENV NODE_ENV=development
+ENV PATH /workspace/node_modules/.bin:$PATH
 
-ADD . /workspace
+# Copy package files first (better layer caching)
+COPY package.json package-lock.json* /workspace/
 
-CMD yarn start
+# Install dependencies
+RUN npm install
+
+# Copy application code
+COPY . /workspace
+
+# Set proper permissions
+RUN chown -R node:node /workspace /watch /in-progress /completed /logs
+
+# Use non-root user for better security
+USER node
+
+# Command
+CMD ["npm", "run", "watch"]

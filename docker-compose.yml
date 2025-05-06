@@ -1,14 +1,23 @@
-version: '3.2'
+version: '3.8'
 
 services:
   downloader:
     build: .
-    restart: on-failure
-    command: yarn watch
+    restart: unless-stopped
+    command: npm run watch
     env_file: .env
     volumes:
       - /workspace/node_modules
       - .:/workspace
+      # For Windows users
       - E:/offcloud/watch:/watch
       - E:/offcloud/in-progress:/in-progress
       - E:/offcloud/completed:/completed
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    environment:
+      - NODE_ENV=development
