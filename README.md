@@ -37,6 +37,7 @@ An offcloud.com blackhole downloader with intelligent queue management and moder
 - **Modern HTTP handling with axios for increased reliability**
 - **Improved error recovery and retry mechanism**
 - **Enhanced progress tracking for large downloads**
+- **Centralized utilities for retry logic and file operations**
 
 ## Queue Management System
 
@@ -46,11 +47,57 @@ The application includes an intelligent queue management system that:
 
 2. **Prioritizes downloads**: Files are queued based on priority and submission time, ensuring orderly processing.
 
-3. **Auto-cleans old downloads**: The system periodically removes older completed downloads from your Offcloud account to free up space for new downloads.
+3. **Auto-cleans old downloads**: The system periodically removes older completed downloads from your Offcloud account to free up space for new downloads. By default, any completed downloads older than 24 hours will be removed from Offcloud.com (but remain in your local completed folder).
 
 4. **Manages concurrent downloads**: Limits the number of simultaneous downloads to optimize performance and reliability.
 
 5. **Handles errors gracefully**: Failed downloads are automatically retried with a backoff strategy before being removed from the queue.
+
+## Cleanup Configuration
+
+The application automatically cleans up completed downloads on Offcloud.com:
+
+- **Immediate cleanup**: When a download completes successfully to your local machine, it's immediately removed from Offcloud.com.
+- **Periodic cleanup**: A background task runs every hour to remove any completed downloads that are older than 24 hours from Offcloud.com.
+
+The periodic cleanup can be configured by modifying `lib/watchers/offcloud/queuemanager.js`:
+
+```javascript
+// To change the cleanup timeframe (e.g., to 72 hours)
+async cleanupCompletedDownloads(maxAgeHours = 72) {
+  // ...
+}
+
+// To disable periodic cleanup entirely
+startPeriodicCleanup() {
+  /*
+  this.cleanupInterval = setInterval(() => {
+    this.cleanupCompletedDownloads();
+  }, 60 * 60 * 1000);
+  */
+  
+  // Keep this part for local memory management
+  this.processedFilesCleanupInterval = setInterval(() => {
+    // ...
+  }, 3600000);
+}
+```
+
+**Note**: This cleanup only affects files on Offcloud.com. Files in your local `/completed` directory are never automatically deleted.
+
+## Code Architecture
+
+The application uses a modular architecture:
+
+- **Core components**: 
+  - `index.js`: Main application entry point
+  - `lib/watchers/offcloud`: Monitors Offcloud.com and manages downloads
+  - `lib/downloaders/inline`: Handles the actual file downloads
+
+- **Utility modules**:
+  - `lib/utils/retry.js`: Centralized retry logic with exponential backoff
+  - `lib/utils/fileOperations.js`: Common file handling operations
+  - `lib/utils/logger.js`: Logging with configurable levels and formats
 
 ## Requirements
 
@@ -120,7 +167,8 @@ The application provides detailed logging with configurable levels. To enable de
 - Uses axios for API communication and downloads
 - File monitoring with chokidar
 - Intelligent queue management with priority-based processing
-- Robust error handling with exponential backoff for retries
+- Robust error handling with centralized retry logic
+- Standardized file operations for improved reliability
 
 ## Contributing
 
