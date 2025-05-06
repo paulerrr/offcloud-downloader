@@ -1,11 +1,11 @@
-const chokidar = require('chokidar')
-const OffCloudWatcher = require('./lib/watchers/offcloud')
-const Downloader = require('./lib/downloaders/inline')
-const fs = require('fs')
-const path = require('path')
-const logger = require('./lib/utils/logger')
-const fileOps = require('./lib/utils/fileOperations')
-const { withRetry, sleep } = require('./lib/utils/retry')
+import chokidar from 'chokidar';
+import OffCloudWatcher from './lib/watchers/offcloud/index.js';
+import Downloader from './lib/downloaders/inline/index.js';
+import fs from 'fs';
+import path from 'path';
+import logger from './lib/utils/logger.js';
+import fileOps from './lib/utils/fileOperations.js';
+import { withRetry, sleep } from './lib/utils/retry.js';
 
 // Parse environment variables, ensuring numeric values are converted from strings to numbers
 const {
@@ -18,17 +18,17 @@ const {
   MAX_CONCURRENT_DOWNLOADS: maxDownloadsStr = '3',
   FILE_POLL_INTERVAL: pollIntervalStr = '1000',
   FILE_STABLE_TIME: stableTimeStr = '5000'
-} = process.env
+} = process.env;
 
 // Convert string env vars to numbers
-const WATCH_RATE = parseInt(watchRateStr, 10) || 5000
-const MAX_CONCURRENT_DOWNLOADS = parseInt(maxDownloadsStr, 10) || 3
-const FILE_POLL_INTERVAL = parseInt(pollIntervalStr, 10) || 1000
-const FILE_STABLE_TIME = parseInt(stableTimeStr, 10) || 5000
+const WATCH_RATE = parseInt(watchRateStr, 10) || 5000;
+const MAX_CONCURRENT_DOWNLOADS = parseInt(maxDownloadsStr, 10) || 3;
+const FILE_POLL_INTERVAL = parseInt(pollIntervalStr, 10) || 1000;
+const FILE_STABLE_TIME = parseInt(stableTimeStr, 10) || 5000;
 
 if (!OFFCLOUD_API_KEY) {
-  logger.error('OFFCLOUD_API_KEY environment variable is not set')
-  process.exit(-1)
+  logger.error('OFFCLOUD_API_KEY environment variable is not set');
+  process.exit(-1);
 }
 
 // Ensure all required directories exist
@@ -65,13 +65,13 @@ const createDirectories = async () => {
     OFFCLOUD_API_KEY, 
     downloader.download,
     MAX_CONCURRENT_DOWNLOADS  // Now a number, not a string
-  )
+  );
 
-  logger.info(`Watching '${WATCH_DIR}' for new nzbs, magnets and torrents`)
+  logger.info(`Watching '${WATCH_DIR}' for new nzbs, magnets and torrents`);
 
   // Track watcher state
-  let watcherHealthy = true
-  let lastFileAddedTime = Date.now()
+  let watcherHealthy = true;
+  let lastFileAddedTime = Date.now();
 
   // Set to track files that are being processed or have been processed
   const processedFiles = new Set();
@@ -104,8 +104,8 @@ const createDirectories = async () => {
   
   // Process a file once detected
   const processFile = async (filePath) => {
-    logger.info(`Detected new file: '${filePath}'`)
-    lastFileAddedTime = Date.now()
+    logger.info(`Detected new file: '${filePath}'`);
+    lastFileAddedTime = Date.now();
     
     // Check if this file is already being processed
     if (processedFiles.has(filePath)) {
@@ -152,15 +152,15 @@ const createDirectories = async () => {
 
   // Handle errors
   fileWatcher.on('error', error => {
-    logger.error(`Watcher error:`, error)
-    watcherHealthy = false
-  })
+    logger.error(`Watcher error:`, error);
+    watcherHealthy = false;
+  });
 
   // Handle watcher ready state
   fileWatcher.on('ready', () => {
-    logger.success('Initial scan complete. Ready for changes')
-    watcherHealthy = true
-  })
+    logger.success('Initial scan complete. Ready for changes');
+    watcherHealthy = true;
+  });
 
   // Create function to safely recreate watcher
   const recreateWatcher = async () => {
