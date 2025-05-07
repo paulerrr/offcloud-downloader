@@ -14,6 +14,7 @@ An offcloud.com blackhole downloader with intelligent queue management and moder
 | MAX_CONCURRENT_DOWNLOADS | Maximum number of concurrent downloads | 3 |
 | FILE_STABLE_TIME | How long a file must be stable before processing (ms) | 5000 |
 | FILE_POLL_INTERVAL | How often to poll for file changes (ms) | 1000 |
+| FORCE_POLLING | Force file system polling even on non-Windows systems | false |
 | LOG_LEVEL | Logging level (error, warn, info, http, debug) | info |
 | LOG_TO_FILE | Enable logging to file (true/false) | false |
 | LOG_FILE_PATH | Path to log file | ./logs/offcloud-downloader.log |
@@ -38,6 +39,10 @@ An offcloud.com blackhole downloader with intelligent queue management and moder
 - **Improved error recovery and retry mechanism**
 - **Enhanced progress tracking for large downloads**
 - **Centralized utilities for retry logic and file operations**
+- **Advanced file system monitoring with Chokidar v4**
+- **Automatic watcher recovery for improved stability**
+- **File locking mechanism to prevent conflicts**
+- **Log rotation for better log management**
 
 ## Queue Management System
 
@@ -52,6 +57,15 @@ The application includes an intelligent queue management system that:
 4. **Manages concurrent downloads**: Limits the number of simultaneous downloads to optimize performance and reliability.
 
 5. **Handles errors gracefully**: Failed downloads are automatically retried with a backoff strategy before being removed from the queue.
+
+## File System Monitoring
+
+The application uses Chokidar v4 for file system monitoring with several key features:
+
+1. **Optimized Performance**: Reduces CPU usage by using native file system events where available
+2. **Automatic Recovery**: Self-repairs when file system watchers encounter errors
+3. **Stable File Detection**: Waits for files to stabilize before processing to avoid partial files
+4. **Intelligent Deduplication**: Prevents duplicate processing of the same file
 
 ## Cleanup Configuration
 
@@ -90,14 +104,14 @@ startPeriodicCleanup() {
 The application uses a modular architecture:
 
 - **Core components**: 
-  - `index.js`: Main application entry point
+  - `index.js`: Main application entry point with advanced file monitoring
   - `lib/watchers/offcloud`: Monitors Offcloud.com and manages downloads
   - `lib/downloaders/inline`: Handles the actual file downloads
 
 - **Utility modules**:
-  - `lib/utils/retry.js`: Centralized retry logic with exponential backoff
-  - `lib/utils/fileOperations.js`: Common file handling operations
-  - `lib/utils/logger.js`: Logging with configurable levels and formats
+  - `lib/utils/retry.js`: Enhanced retry logic with exponential backoff
+  - `lib/utils/fileOperations.js`: Robust file handling with locking mechanism
+  - `lib/utils/logger.js`: Advanced logging with rotation and formatting
 
 ## Requirements
 
@@ -159,16 +173,26 @@ volumes:
 
 ## Logging
 
-The application provides detailed logging with configurable levels. To enable debug logging, set `LOG_LEVEL=debug` in your `.env` file. For persistent logs, enable file logging with `LOG_TO_FILE=true`.
+The application provides detailed logging with configurable levels and rotation. To enable debug logging, set `LOG_LEVEL=debug` in your `.env` file. For persistent logs, enable file logging with `LOG_TO_FILE=true`.
 
-## Technical Details
+Log files are automatically rotated when they reach the configured size (`LOG_MAX_SIZE`), and old log files are removed when they exceed the configured count (`LOG_MAX_FILES`).
 
-- Built with Node.js
-- Uses axios for API communication and downloads
-- File monitoring with chokidar
-- Intelligent queue management with priority-based processing
-- Robust error handling with centralized retry logic
-- Standardized file operations for improved reliability
+## Performance Considerations
+
+- **Windows Systems**: File polling is used by default for better compatibility
+- **Linux/macOS**: Native file system events are used for better performance
+- **High Volume**: If processing many files simultaneously, consider increasing `MAX_CONCURRENT_DOWNLOADS`
+- **Limited Resources**: For systems with limited CPU/memory, reduce polling by setting `FILE_POLL_INTERVAL` higher
+
+## Troubleshooting
+
+If you encounter issues:
+
+1. **Check logs**: Enable debug logging with `LOG_LEVEL=debug` for detailed information
+2. **Verify permissions**: Ensure the application has appropriate permissions for all directories
+3. **Inspect network**: Many issues stem from network connectivity problems with Offcloud
+4. **Memory usage**: Monitor memory usage to ensure it remains stable over time
+5. **Watcher issues**: If file detection problems occur, try setting `FORCE_POLLING=true`
 
 ## Contributing
 

@@ -1,3 +1,4 @@
+// Updated Chokidar implementation for index.js
 import chokidar from 'chokidar';
 import OffCloudWatcher from './lib/watchers/offcloud/index.js';
 import Downloader from './lib/downloaders/inline/index.js';
@@ -49,7 +50,6 @@ const createDirectories = async () => {
   await createDirectories();
 
   // Create a downloader instance with the new directories
-  // Note: DOWNLOAD_DIR is kept as parameter for compatibility but not used
   const downloader = new Downloader(WATCH_DIR, DOWNLOAD_DIR, IN_PROGRESS_DIR, COMPLETED_DIR);
 
   logger.info('Download configuration:');
@@ -64,239 +64,327 @@ const createDirectories = async () => {
   const watcher = new OffCloudWatcher(
     OFFCLOUD_API_KEY, 
     downloader.download,
-    MAX_CONCURRENT_DOWNLOADS  // Now a number, not a string
+    MAX_CONCURRENT_DOWNLOADS
   );
 
   logger.info(`Watching '${WATCH_DIR}' for new nzbs, magnets and torrents`);
 
+  // Set to track files that are being processed or have been processed
+  const processedFiles = new Map(); // Map of file path to { timestamp, processingStatus }
+  
   // Track watcher state
   let watcherHealthy = true;
+  let watcherStartTime = Date.now();
+  let consecutiveErrorCount = 0;
   let lastFileAddedTime = Date.now();
+  let fileWatcher = null;
 
-  // Set to track files that are being processed or have been processed
-  const processedFiles = new Set();
+  // Function to check if a file should be ignored
+  const shouldIgnoreFile = (filePath, stats) => {
+    // Skip if it's a directory
+    if (stats && stats.isDirectory()) return false;
+    
+    const fileName = path.basename(filePath);
+    
+    // Ignore hidden files (dotfiles)
+    if (fileName.startsWith('.')) return true;
+    
+    // Ignore temporary and in-progress files
+    if (fileName.endsWith('.queued') || 
+        fileName.endsWith('.part') || 
+        fileName.endsWith('.downloading')) return true;
+    
+    // Only process specific extensions
+    const extension = path.extname(filePath).toLowerCase();
+    if (!['.torrent', '.magnet', '.nzb'].includes(extension)) return true;
+    
+    return false;
+  };
 
   // Setup watcher with more robust configuration
   const createNewWatcher = () => {
-    const watcher = chokidar.watch(`${WATCH_DIR}`, {
+    watcherStartTime = Date.now();
+    
+    const watcher = chokidar.watch(WATCH_DIR, {
       persistent: true,
       ignoreInitial: false,
       awaitWriteFinish: {
         stabilityThreshold: FILE_STABLE_TIME,
         pollInterval: FILE_POLL_INTERVAL
       },
-      ignored: [
-        /(^|[\/\\])\../,  // Ignore dotfiles
-        '**/*.queued',     // Ignore .queued files
-        '**/*.part',       // Ignore partial downloads
-        '**/*.downloading' // Ignore downloading files
-      ],
+      // Updated ignored to use function instead of glob patterns for Chokidar v4 compatibility
+      ignored: shouldIgnoreFile,
       depth: 99,
-      usePolling: true,
+      // Use polling only if needed - on platforms where FSEvents isn't available
+      usePolling: process.platform === 'win32' || process.env.FORCE_POLLING === 'true',
       interval: FILE_POLL_INTERVAL,
       binaryInterval: 3000,
       alwaysStat: true,
       atomic: 500
     });
     
+    // Add event handlers
+    watcher
+      .on('ready', () => {
+        logger.success('Initial scan complete. Ready for changes');
+        watcherHealthy = true;
+        consecutiveErrorCount = 0;
+      })
+      .on('error', (error) => {
+        logger.error(`Watcher error:`, error);
+        consecutiveErrorCount++;
+        
+        if (consecutiveErrorCount > 5) {
+          watcherHealthy = false;
+          logger.warn(`Multiple consecutive errors detected. Watcher will be recreated.`);
+        }
+      })
+      .on('add', async (filePath, stats) => {
+        try {
+          await processFile(filePath, stats);
+        } catch (err) {
+          logger.error(`Error processing file ${filePath}:`, err.message);
+        }
+      });
+    
     return watcher;
   };
   
   // Process a file once detected
-  const processFile = async (filePath) => {
-    logger.info(`Detected new file: '${filePath}'`);
+  const processFile = async (filePath, stats) => {
+    if (!stats) {
+      try {
+        stats = await fs.promises.stat(filePath);
+      } catch (err) {
+        logger.error(`Error getting stats for ${filePath}:`, err.message);
+        return;
+      }
+    }
+    
+    // Skip ignored files
+    if (shouldIgnoreFile(filePath, stats)) {
+      const extension = path.extname(filePath).toLowerCase();
+      if (!['.torrent', '.magnet', '.nzb'].includes(extension)) {
+        logger.debug(`Ignoring '${filePath}' because it has an unknown extension (${extension})`);
+      } else {
+        logger.debug(`Ignoring '${filePath}' because it matched ignore patterns`);
+      }
+      return;
+    }
+    
+    logger.info(`Detected file: '${filePath}'`);
     lastFileAddedTime = Date.now();
     
+    // Get the file id (path + size + mtime) for better deduplication
+    const fileId = `${filePath}:${stats.size}:${stats.mtimeMs}`;
+    
     // Check if this file is already being processed
-    if (processedFiles.has(filePath)) {
-      logger.warn(`File '${filePath}' is already being processed, skipping`);
-      return;
-    }
-    
-    // Skip hidden files, .queued files, and other special files
-    if (path.basename(filePath).startsWith('.') || 
-        filePath.indexOf('.queued') !== -1 || 
-        filePath.indexOf('.part') !== -1 || 
-        filePath.indexOf('.downloading') !== -1) {
-      logger.debug(`Ignoring '${filePath}' because it is a work file or hidden file`);
-      return;
-    }
-    
-    // Check for supported file extensions
-    const extension = path.extname(filePath).toLowerCase();
-    if (['.torrent', '.magnet', '.nzb'].includes(extension)) {
-      // Mark the file as processed to avoid duplicates
-      processedFiles.add(filePath);
+    if (processedFiles.has(fileId)) {
+      const fileInfo = processedFiles.get(fileId);
       
-      // Add the file to the watcher's queue
-      try {
-        await watcher.addFile(filePath);
-      } catch (err) {
-        logger.error(`Error adding file to queue: ${err.message}`);
+      // If the file was processed in the last hour, skip it
+      if (Date.now() - fileInfo.timestamp < 3600000) {
+        logger.warn(`File '${filePath}' was processed recently (${new Date(fileInfo.timestamp).toLocaleTimeString()}), skipping`);
+        return;
       }
       
-      // Set a timeout to remove from processed files list after a while 
-      // (in case the file was replaced with a new one)
-      setTimeout(() => {
-        processedFiles.delete(filePath);
-      }, 3600000); // 1 hour
-    } else {
-      logger.warn(`Ignoring '${filePath}' because it has an unknown extension (${extension})`);
+      // If the file is currently being processed, skip it
+      if (fileInfo.status === 'processing') {
+        logger.warn(`File '${filePath}' is currently being processed, skipping`);
+        return;
+      }
+    }
+    
+    // Mark file as being processed
+    processedFiles.set(fileId, { 
+      timestamp: Date.now(),
+      status: 'processing'
+    });
+    
+    try {
+      // Add the file to the watcher's queue
+      await watcher.addFile(filePath);
+      
+      // Update status to 'processed'
+      processedFiles.set(fileId, {
+        timestamp: Date.now(),
+        status: 'processed'
+      });
+      
+      logger.success(`Successfully queued file: ${filePath}`);
+    } catch (err) {
+      logger.error(`Error adding file to queue: ${err.message}`);
+      
+      // Update status to 'error'
+      processedFiles.set(fileId, {
+        timestamp: Date.now(),
+        status: 'error',
+        error: err.message
+      });
     }
   };
 
-  let fileWatcher = createNewWatcher();
+  // Initialize the watcher
+  fileWatcher = createNewWatcher();
 
-  // Handle file add event
-  fileWatcher.on('add', processFile);
-
-  // Handle errors
-  fileWatcher.on('error', error => {
-    logger.error(`Watcher error:`, error);
-    watcherHealthy = false;
-  });
-
-  // Handle watcher ready state
-  fileWatcher.on('ready', () => {
-    logger.success('Initial scan complete. Ready for changes');
-    watcherHealthy = true;
-  });
-
-  // Create function to safely recreate watcher
+  // Function to safely recreate watcher
   const recreateWatcher = async () => {
+    logger.warn('Recreating file watcher...');
+    
     try {
       if (fileWatcher) {
         try {
           await fileWatcher.close();
-          logger.info('Closed old watcher, creating new one');
+          logger.info('Closed old watcher');
         } catch (err) {
           logger.error(`Error closing watcher:`, err.message);
         }
       }
       
       fileWatcher = createNewWatcher();
-      
-      // Reattach event handlers
-      fileWatcher.on('add', processFile);
-      
-      fileWatcher.on('error', error => {
-        logger.error(`Watcher error:`, error);
-        watcherHealthy = false;
-      });
-      
-      fileWatcher.on('ready', () => {
-        logger.success('Initial scan complete. Ready for changes');
-        watcherHealthy = true;
-      });
-      
       logger.success('Watcher recreated successfully');
+      
+      // Wait for the ready event or timeout after 30 seconds
+      await Promise.race([
+        new Promise(resolve => fileWatcher.once('ready', resolve)),
+        new Promise(resolve => setTimeout(resolve, 30000))
+      ]);
+      
+      return true;
     } catch (err) {
       logger.error(`Error recreating watcher:`, err.message);
+      return false;
     }
   };
 
   // Function to perform a manual directory scan
   const performManualScan = async () => {
-    logger.debug('Performing periodic directory scan');
+    logger.debug('Performing manual directory scan');
     
     try {
-      // Manual scan for new files that might have been missed
       const dirents = await fs.promises.readdir(WATCH_DIR, { withFileTypes: true });
       
-      // Process each file in the directory
       for (const dirent of dirents) {
-        // Skip directories and non-files
         if (!dirent.isFile()) continue;
         
-        const fileName = dirent.name;
-        const filePath = path.join(WATCH_DIR, fileName);
+        const filePath = path.join(WATCH_DIR, dirent.name);
         
-        // Skip already processed files and hidden files
-        if (processedFiles.has(filePath) || fileName.startsWith('.') || 
-            fileName.includes('.queued') || fileName.includes('.part') || 
-            fileName.includes('.downloading')) {
-          continue;
-        }
-        
-        // Check if file is a supported type
-        const extension = path.extname(fileName).toLowerCase();
-        if (['.torrent', '.magnet', '.nzb'].includes(extension)) {
-          // Check if file is already being processed by the watcher
-          // Updated check to properly handle Set vs Map for processingRequests
-          const isAlreadyProcessing = watcher.watchList.some(torrent => torrent.file === filePath) ||
-                                     (watcher.queueManager && watcher.queueManager.processingRequests && 
-                                      (watcher.queueManager.processingRequests instanceof Set ? 
-                                       watcher.queueManager.processingRequests.has(filePath) : 
-                                       Array.from(watcher.queueManager.processingRequests.keys ? 
-                                                 watcher.queueManager.processingRequests.keys() : 
-                                                 []).includes(filePath)));
+        try {
+          const stats = await fs.promises.stat(filePath);
           
-          if (!isAlreadyProcessing) {
-            logger.info(`Found unprocessed file during scan: '${filePath}'`);
-            await processFile(filePath);
+          // Don't reprocess files that are being processed or were recently processed
+          const fileId = `${filePath}:${stats.size}:${stats.mtimeMs}`;
+          
+          if (processedFiles.has(fileId)) {
+            const fileInfo = processedFiles.get(fileId);
+            
+            if (fileInfo.status === 'processing' || 
+                (fileInfo.status === 'processed' && Date.now() - fileInfo.timestamp < 3600000)) {
+              continue;
+            }
           }
+          
+          await processFile(filePath, stats);
+        } catch (err) {
+          logger.error(`Error processing file during scan (${filePath}):`, err.message);
         }
       }
     } catch (err) {
-      logger.error(`Error reading directory:`, err.message);
+      logger.error(`Error reading watch directory:`, err.message);
     }
-    
-    // Update timestamp to avoid too many manual scans
-    lastFileAddedTime = Date.now();
   };
 
-  // Periodic backup scan of the directory to ensure no files are missed
+  // Health check and task processing
   setInterval(async () => {
-    // Check watcher health
-    if (!watcherHealthy) {
-      logger.warn('Watcher appears unhealthy, attempting to recover...');
+    // Check watcher health based on multiple criteria
+    const watcherRuntime = Date.now() - watcherStartTime;
+    
+    const needsRecreation = 
+      !watcherHealthy || 
+      consecutiveErrorCount > 5 ||
+      watcherRuntime > 86400000; // Recreate watcher every 24 hours for good measure
+    
+    if (needsRecreation) {
+      logger.warn(`Watcher needs recreation. Healthy: ${watcherHealthy}, Errors: ${consecutiveErrorCount}, Runtime: ${Math.floor(watcherRuntime / 60000)}m`);
       await recreateWatcher();
     }
-
+    
     // If it's been a while since a file was processed, do a manual check
     const timeSinceLastFile = Date.now() - lastFileAddedTime;
-    if (timeSinceLastFile > 30000) { // 30 seconds
+    if (timeSinceLastFile > 60000) { // 60 seconds
       await performManualScan();
     }
 
     // Check the torrent watch list
-    await watcher.checkWatchList();
+    try {
+      await watcher.checkWatchList();
+    } catch (err) {
+      logger.error(`Error checking watch list:`, err.message);
+    }
   }, WATCH_RATE);
 
   // Clean up old entries in the processed files set
   setInterval(() => {
-    const oldSize = processedFiles.size;
-    if (oldSize > 1000) {
-      logger.info(`Cleaning up processed files cache (${oldSize} entries)`);
-      processedFiles.clear();
+    const now = Date.now();
+    let cleanupCount = 0;
+    
+    // Remove entries older than 24 hours
+    for (const [fileId, info] of processedFiles.entries()) {
+      if (now - info.timestamp > 86400000) {
+        processedFiles.delete(fileId);
+        cleanupCount++;
+      }
+    }
+    
+    if (cleanupCount > 0) {
+      logger.info(`Cleaned up ${cleanupCount} old processed file entries`);
     }
   }, 3600000); // Every hour
 
-  // Handle process termination
+  // Handle process termination gracefully
   const gracefulShutdown = async (signal) => {
-    logger.info(`Received ${signal}, closing watchers and exiting...`);
+    logger.info(`Received ${signal}, shutting down gracefully...`);
     
+    // Close file watcher
     if (fileWatcher) {
       try {
         await fileWatcher.close();
+        logger.info('File watcher closed');
       } catch (err) {
         logger.error(`Error closing file watcher:`, err.message);
       }
     }
     
+    // Clean up offcloud watcher
     if (watcher) {
       try {
         watcher.cleanup();
+        logger.info('Offcloud watcher cleaned up');
       } catch (err) {
-        logger.error(`Error cleaning up watcher:`, err.message);
+        logger.error(`Error cleaning up offcloud watcher:`, err.message);
       }
     }
     
+    logger.info('Shutdown complete');
     process.exit(0);
   };
 
+  // Register shutdown handlers
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  
+  // Handle uncaught exceptions
+  process.on('uncaughtException', (err) => {
+    logger.error(`Uncaught exception:`, err);
+    // Don't exit, try to keep the process running
+  });
+  
+  // Handle unhandled promise rejections
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error(`Unhandled promise rejection:`, reason);
+    // Don't exit, try to keep the process running
+  });
+
 })().catch(err => {
   logger.error("Error during application startup:", err.message);
   process.exit(1);
