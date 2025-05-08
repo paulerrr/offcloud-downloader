@@ -143,6 +143,64 @@ docker-compose up -d
 docker-compose logs -f
 ```
 
+### Running in Headless Mode
+
+The application is designed to run as a background service in "headless" mode, which means it doesn't require an active terminal session to continue working.
+
+To run in headless mode:
+
+```bash
+# Start the container in detached mode
+docker-compose up -d
+```
+
+This will launch the container in the background. It will continue running even after you close your terminal window or disconnect from the server.
+
+#### Viewing Logs in Headless Mode
+
+When running in headless mode, you have several options for monitoring logs:
+
+1. **Using Docker Compose**:
+   ```bash
+   # View all logs
+   docker-compose logs downloader
+   
+   # Follow/stream logs in real-time
+   docker-compose logs -f downloader
+   
+   # View only the last 100 lines
+   docker-compose logs --tail=100 downloader
+   ```
+
+2. **Using Docker Desktop**:
+   If you're running Docker Desktop, you can view container logs through the graphical interface by selecting the container in the Containers tab.
+
+3. **Enable File-Based Logging**:
+   To keep persistent logs that you can access at any time, enable file logging in your `.env` file:
+   ```
+   LOG_TO_FILE=true
+   LOG_FILE_PATH=./logs/offcloud-downloader.log
+   ```
+   This will write logs to a file that you can access even when the container is running headlessly.
+
+#### Managing Headless Containers
+
+To manage your headless container:
+
+```bash
+# Stop the container (it will restart automatically if using restart:unless-stopped)
+docker-compose stop downloader
+
+# Stop all services
+docker-compose down
+
+# Restart the container
+docker-compose restart downloader
+
+# Check container status
+docker-compose ps
+```
+
 ### Non-Docker Setup
 
 If you prefer to run without Docker:
@@ -176,6 +234,16 @@ volumes:
 The application provides detailed logging with configurable levels and rotation. To enable debug logging, set `LOG_LEVEL=debug` in your `.env` file. For persistent logs, enable file logging with `LOG_TO_FILE=true`.
 
 Log files are automatically rotated when they reach the configured size (`LOG_MAX_SIZE`), and old log files are removed when they exceed the configured count (`LOG_MAX_FILES`).
+
+## Progress Tracking
+
+The application provides detailed progress tracking during downloads:
+
+1. **Remote Phase**: When Offcloud.com is downloading from the source, you'll see status updates in the logs.
+2. **Local Phase**: When downloading from Offcloud.com to your machine, detailed progress percentages are shown:
+   ```
+   [+] Download progress: 13.11MB / 40.70MB (32.21%)
+   ```
 
 ## Performance Considerations
 
