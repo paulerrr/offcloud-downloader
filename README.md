@@ -261,11 +261,3 @@ If you encounter issues:
 3. **Inspect network**: Many issues stem from network connectivity problems with Offcloud
 4. **Memory usage**: Monitor memory usage to ensure it remains stable over time
 5. **Watcher issues**: If file detection problems occur, try setting `FORCE_POLLING=true`
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
